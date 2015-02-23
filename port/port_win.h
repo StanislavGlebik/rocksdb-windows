@@ -32,8 +32,8 @@
 #include <string>
 #include <string.h>
 #include "rocksdb/options.h"
-#include "port/atomic_pointer.h"
 
+#include "Windows.h"
 
 #define __attribute__(x)
 #define __thread __declspec(thread)
@@ -59,27 +59,7 @@ int pthread_setspecific(pthread_key_t key, const void *value);
 
 #undef FAILED
 #undef GetCurrentTime
-
-#if defined(OS_MACOSX) || defined(OS_SOLARIS) || defined(OS_FREEBSD) ||\
-    defined(OS_NETBSD) || defined(OS_OPENBSD) || defined(OS_DRAGONFLYBSD) ||\
-    defined(OS_ANDROID)
-// Use fread/fwrite/fflush on platforms without _unlocked variants
-#define fread_unlocked fread
-#define fwrite_unlocked fwrite
-#define fflush_unlocked fflush
-#endif
-
-#if defined(OS_MACOSX) || defined(OS_FREEBSD) ||\
-    defined(OS_OPENBSD) || defined(OS_DRAGONFLYBSD)
-// Use fsync() on platforms without fdatasync()
-#define fdatasync fsync
-#endif
-
-#if defined(OS_ANDROID) && __ANDROID_API__ < 9
-// fdatasync() was only introduced in API level 9 on Android. Use fsync()
-// when targetting older platforms.
-#define fdatasync fsync
-#endif
+#undef DeleteFile // TODO(stash): check it!!!
 
 namespace rocksdb {
 namespace port {
@@ -140,7 +120,7 @@ class CondVar {
   void Signal();
   void SignalAll();
  private:
-   CONDITION_VARIABLE cv_;
+  CONDITION_VARIABLE cv_;
   Mutex* mu_;
 };
 

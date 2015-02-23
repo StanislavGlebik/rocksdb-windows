@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="util">
@@ -24,7 +24,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="rocksdb.gyp"/>
+    <None Include="rocksdb.gyp" />
     <ClCompile Include="util\env_win.cc">
       <Filter>util</Filter>
     </ClCompile>
@@ -115,9 +115,6 @@
     <ClInclude Include="rocksdb\util\stop_watch.h">
       <Filter>rocksdb\util</Filter>
     </ClInclude>
-    <ClInclude Include="rocksdb\util\blob_store.h">
-      <Filter>rocksdb\util</Filter>
-    </ClInclude>
     <ClCompile Include="rocksdb\util\comparator.cc">
       <Filter>rocksdb\util</Filter>
     </ClCompile>
@@ -158,9 +155,6 @@
       <Filter>rocksdb\util</Filter>
     </ClCompile>
     <ClCompile Include="rocksdb\util\bloom.cc">
-      <Filter>rocksdb\util</Filter>
-    </ClCompile>
-    <ClCompile Include="rocksdb\util\blob_store.cc">
       <Filter>rocksdb\util</Filter>
     </ClCompile>
     <ClCompile Include="rocksdb\util\vectorrep.cc">
@@ -259,9 +253,6 @@
     <ClInclude Include="rocksdb\table\plain_table_reader.h">
       <Filter>rocksdb\table</Filter>
     </ClInclude>
-    <ClInclude Include="rocksdb\table\filter_block.h">
-      <Filter>rocksdb\table</Filter>
-    </ClInclude>
     <ClCompile Include="rocksdb\table\plain_table_factory.cc">
       <Filter>rocksdb\table</Filter>
     </ClCompile>
@@ -301,9 +292,6 @@
     <ClInclude Include="rocksdb\table\iter_heap.h">
       <Filter>rocksdb\table</Filter>
     </ClInclude>
-    <ClCompile Include="rocksdb\table\filter_block.cc">
-      <Filter>rocksdb\table</Filter>
-    </ClCompile>
     <ClInclude Include="rocksdb\table\block_based_table_reader.h">
       <Filter>rocksdb\table</Filter>
     </ClInclude>
@@ -313,16 +301,10 @@
     <ClInclude Include="rocksdb\db\compaction.h">
       <Filter>rocksdb\db</Filter>
     </ClInclude>
-    <ClCompile Include="rocksdb\db\tailing_iter.cc">
-      <Filter>rocksdb\db</Filter>
-    </ClCompile>
     <ClInclude Include="rocksdb\db\file_indexer.h">
       <Filter>rocksdb\db</Filter>
     </ClInclude>
     <ClCompile Include="rocksdb\db\file_indexer.cc">
-      <Filter>rocksdb\db</Filter>
-    </ClCompile>
-    <ClCompile Include="rocksdb\db\db_stats_logger.cc">
       <Filter>rocksdb\db</Filter>
     </ClCompile>
     <ClInclude Include="rocksdb\db\log_writer.h">
@@ -490,9 +472,6 @@
     <ClCompile Include="rocksdb\port\stack_trace.cc">
       <Filter>rocksdb\port</Filter>
     </ClCompile>
-    <ClInclude Include="rocksdb\port\atomic_pointer.h">
-      <Filter>rocksdb\port</Filter>
-    </ClInclude>
     <ClInclude Include="rocksdb\port\stack_trace.h">
       <Filter>rocksdb\port</Filter>
     </ClInclude>
@@ -502,5 +481,15 @@
     <ClInclude Include="port\port_win.h">
       <Filter>port</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="TestWinEnv.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="rocksdb\table\full_filter_block.cc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="rocksdb\table\full_filter_block.h" />
+    <ClInclude Include="rocksdb\util\xfunc.cc" />
   </ItemGroup>
 </Project>
