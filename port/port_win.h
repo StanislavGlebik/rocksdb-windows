@@ -60,6 +60,7 @@ int pthread_setspecific(pthread_key_t key, const void *value);
 #undef FAILED
 #undef GetCurrentTime
 #undef DeleteFile // TODO(stash): check it!!!
+#undef Delete
 
 namespace rocksdb {
 namespace port {

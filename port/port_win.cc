@@ -36,7 +36,12 @@ struct tm *localtime_r(const time_t *timep, struct tm *result) {
 
 int pthread_key_create(pthread_key_t *key, void(*destructor)(void*)) {
   // TODO: Register destructor to be called from DllMain
-  return TlsAlloc();
+  *key = TlsAlloc();
+  if (*key == TLS_OUT_OF_INDEXES)
+  {
+    return GetLastError();
+  }
+  return 0;
 }
 
 void *pthread_getspecific(pthread_key_t key) {

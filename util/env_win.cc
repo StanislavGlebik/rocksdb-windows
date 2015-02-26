@@ -32,6 +32,28 @@ namespace rocksdb {
 
 namespace {
 
+class HandleGuard
+{
+public:
+  explicit HandleGuard(HANDLE h) :
+    h_(h)
+  {
+  }
+
+  operator HANDLE()
+  {
+    h_;
+  }
+
+  ~HandleGuard()
+  {
+    ::CloseHandle(h_);
+  }
+
+private:
+  HANDLE h_;
+};
+
 // list of pathnames that are locked
 static std::set<std::string> lockedFiles;
 static port::Mutex mutex_lockedFiles;
@@ -762,27 +784,74 @@ class WindowsEnv : public Env {
 
   virtual Status CreateDir(const std::string& name) {
     Status result;
+    auto res = ::CreateDirectory(TEXT(name.c_str()), NULL);
+    if (0 == res)
+    {
+      auto error = GetLastError();
+      result = IOError(name, error);
+    }
     return result;
   };
 
   virtual Status CreateDirIfMissing(const std::string& name) {
     Status result;
+    auto res = ::CreateDirectory(TEXT(name.c_str()), NULL);
+    if (0 == res)
+    {
+      auto error = GetLastError();
+      if (ERROR_ALREADY_EXISTS != error)
+      {
+        result = IOError(name, error);
+      }
+    }
     return result;
   };
 
   virtual Status DeleteDir(const std::string& name) {
     Status result;
+    auto res = ::RemoveDirectory(TEXT(name.c_str()));
+    if (0 == res)
+    {
+      auto error = GetLastError();
+      result = IOError(name, error);
+    }
     return result;
   };
 
   virtual Status GetFileSize(const std::string& fname, uint64_t* size) {
-    Status s;
-    return s;
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+
+    ::GetFileAttributesEx(TEXT(fname.c_str()), ::GetFileExInfoStandard, &fad);
+
+    if ((fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+      return Status::NotSupported(fname + " is a directory");
+    }
+
+    *size = static_cast<uint64_t>(fad.nFileSizeHigh) <<
+      (sizeof(fad.nFileSizeLow) * 8) + fad.nFileSizeLow;
+    return Status::OK();
   }
 
   virtual Status GetFileModificationTime(const std::string& fname,
                                          uint64_t* file_mtime) {
-    return Status::NotSupported("Not supported yet");
+    // GetFileTime
+    auto h = HandleGuard(CreateFile(fname.c_str(), 0,
+      FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, 0,
+      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0));
+
+    if (h == INVALID_HANDLE_VALUE)
+    {
+      return IOError(fname, GetLastError());
+    }
+
+    FILETIME lwt;
+    ::GetFileTime(h, 0, 0, &lwt);
+
+    LARGE_INTEGER ans;
+    ans.HighPart = lwt.dwHighDateTime;
+    ans.LowPart = lwt.dwLowDateTime;
+    *file_mtime = ans.QuadPart;
   }
 
   virtual Status LockFile(const std::string& fname, FileLock** lock) {
