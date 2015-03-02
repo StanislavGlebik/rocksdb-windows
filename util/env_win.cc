@@ -18,7 +18,11 @@
 #include <signal.h>
 #include <time.h>
 #include <Windows.h>
+#include <io.h>
 
+#include <deque>
+#include <mutex>
+#include <condition_variable>
 #include <atomic>
 
 #define WORKING
@@ -42,7 +46,7 @@ public:
 
   operator HANDLE()
   {
-    h_;
+    return h_;
   }
 
   ~HandleGuard()
@@ -672,6 +676,23 @@ class WindowsWritableFile : public WritableFile {
   }
 };
 
+class WindowsDirectory : public Directory
+{
+public:
+  explicit WindowsDirectory()
+  {
+  }
+
+  virtual Status Fsync()
+  {
+    // TODO(stash): check it!!!!
+    return Status::OK();
+  }
+
+  ~WindowsDirectory()
+  {
+  } 
+};
 
 class WindowsEnv : public Env {
  public:
@@ -771,15 +792,32 @@ class WindowsEnv : public Env {
     return Status::OK();
   }
 
-
   virtual Status DeleteFile(const std::string& fname) {
-	  return Status::NotSupported("Not supported yet");
+    // TODO(stash): check it.
+#ifdef UNICODE
+#define DeleteFile  DeleteFileW
+#else
+#define DeleteFile  DeleteFileA
+#endif // !UNICODE
+    if (!DeleteFile(TEXT(fname.c_str())))
+#undef DeleteFile
+    {
+      return IOError(fname, GetLastError());
+    }
+	  return Status::OK();
   }
+
 
   virtual Status RenameFile(const std::string& src,
 	  const std::string& target)
   {
-	  return Status::NotSupported("Not supported yet");
+    // TODO(stash): check params
+    if (0 == ::MoveFileEx(TEXT(src.c_str()),
+      TEXT(target.c_str()), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
+    {
+      return IOError(src, GetLastError());
+    }
+	  return Status::OK();
   }
 
   virtual Status CreateDir(const std::string& name) {
@@ -928,11 +966,9 @@ class WindowsEnv : public Env {
     // Not implemented yet
   }
 
-
  private:
   bool checkedDiskForMmap_;
   bool forceMmapOff; // do we override Env options?
-
 
   // Returns true iff the named directory exists and is a directory.
   virtual bool DirExists(const std::string& dname) {
@@ -944,27 +980,96 @@ class WindowsEnv : public Env {
 
   class ThreadPool {
    public:
-    ThreadPool() {
+    ThreadPool()
+      : total_threads_limit_(1),
+      bgthreads_(0),
+      queue_(),
+      queue_len_(),
+      exit_all_threads_(false),
+      low_io_priority_(false)
+    {
+      // TODO(stash): check
+      queue_len_.store(0, std::memory_order_relaxed);
     }
 
     ~ThreadPool() {
+      assert(bgthreads_.size() == 0U);
+    }
+
+    void JoinAllThreads() {
+      std::unique_lock<std::mutex> lock(mu_);
+      assert(!exit_all_threads_);
+      exit_all_threads_ = true;
+      bgsignal_.notify_all();
+      lock.unlock();
+
+      WaitForMultipleObjects(bgthreads_.size(), bgthreads_.data(), TRUE, INFINITE);
+      bgthreads_.clear();
+    }
+
+    void LowerIOPriority() {
+      std::lock_guard<std::mutex> lock(mu_);
+      low_io_priority_ = true;
     }
 
     // Return true if there is at least one thread needs to terminate.
     bool HasExcessiveThread() {
+      return static_cast<int>(bgthreads_.size()) > total_threads_limit_;
     }
 
     // Return true iff the current thread is the excessive thread to terminate.
     // Always terminate the running thread that is added last, even if there are
     // more than one thread to terminate.
     bool IsLastExcessiveThread(size_t thread_id) {
+      return HasExcessiveThread() && thread_id == bgthreads_.size() - 1;
     }
 
     // Is one of the threads to terminate.
     bool IsExcessiveThread(size_t thread_id) {
+      return static_cast<int>(bgthreads_.size()) > total_threads_limit_;
     }
 
     void BGThread(size_t thread_id) {
+      bool low_io_priority = false;
+      while (true) {
+        // Wait until there is an item that is ready to run
+        std::unique_lock<std::mutex> lock(mu_);
+        // Stop waiting if the thread needs to do work or needs to terminate.
+        bgsignal_.wait(lock, [&]{return exit_all_threads_ || IsLastExcessiveThread(thread_id) ||
+          !(queue_.empty() || IsExcessiveThread(thread_id)); });
+
+        if (exit_all_threads_) { // mechanism to let BG threads exit safely
+          lock.unlock();
+          break;
+        }
+        if (IsLastExcessiveThread(thread_id)) {
+          // Current thread is the last generated one and is excessive.
+          // We always terminate excessive thread in the reverse order of
+          // generation time.
+          auto terminating_thread = bgthreads_.back();
+          CloseHandle(terminating_thread);
+          bgthreads_.pop_back();
+          if (HasExcessiveThread()) {
+            // There is still at least more excessive thread to terminate.
+            WakeUpAllThreads();
+          }
+          lock.unlock();
+          break;
+        }
+        void(*function)(void*) = queue_.front().function;
+        void* arg = queue_.front().arg;
+        queue_.pop_front();
+        queue_len_.store(static_cast<unsigned int>(queue_.size()),
+          std::memory_order_relaxed);
+
+        bool decrease_io_priority = (low_io_priority != low_io_priority_);
+        lock.unlock();
+
+        if (decrease_io_priority) {
+          low_io_priority = true;
+        }
+        (*function)(arg);
+      }
     }
 
     // Helper struct for passing arguments when creating threads.
@@ -975,38 +1080,114 @@ class WindowsEnv : public Env {
           : thread_pool_(thread_pool), thread_id_(thread_id) {}
     };
 
-    static void* BGThreadWrapper(void* arg) {
+    static DWORD WINAPI BGThreadWrapper(void* arg) {
       BGThreadMetadata* meta = reinterpret_cast<BGThreadMetadata*>(arg);
       size_t thread_id = meta->thread_id_;
       ThreadPool* tp = meta->thread_pool_;
+// TODO(stash): thread status
+/*#if ROCKSDB_USING_THREAD_STATUS
+      // for thread-status
+      ThreadStatusUtil::SetThreadType(tp->env_,
+        (tp->GetThreadPriority() == Env::Priority::HIGH ?
+        ThreadStatus::HIGH_PRIORITY :
+        ThreadStatus::LOW_PRIORITY));
+#endif*/
       delete meta;
       tp->BGThread(thread_id);
-      return nullptr;
+/*#if ROCKSDB_USING_THREAD_STATUS
+      ThreadStatusUtil::UnregisterThread();
+#endif*/
+      return 0;
     }
 
     void WakeUpAllThreads() {
+      bgsignal_.notify_all();
+    }
+
+    void SetBackgroundThreadsInternal(int num, bool allow_reduce) {
+      std::lock_guard<std::mutex> lock(mu_);
+      if (exit_all_threads_) {
+        return;
+      }
+      if (num > total_threads_limit_ ||
+        (num < total_threads_limit_ && allow_reduce)) {
+        total_threads_limit_ = num;
+        WakeUpAllThreads();
+        StartBGThreads();
+      }
+    }
+
+    void IncBackgroundThreadsIfNeeded(int num) {
+      SetBackgroundThreadsInternal(num, false);
     }
 
     void SetBackgroundThreads(int num) {
+      SetBackgroundThreadsInternal(num, true);
     }
 
+    // mu_ should be held
     void StartBGThreads() {
+      // Start background thread if necessary
+      while ((int)bgthreads_.size() < total_threads_limit_) {
+        HANDLE thread = CreateThread(NULL, 0, &ThreadPool::BGThreadWrapper, 
+          new BGThreadMetadata(this, bgthreads_.size()), 0, NULL);
+
+        // Set the thread name to aid debugging
+        // TODO(stash): set thread name
+        bgthreads_.push_back(thread);
+      }
     }
 
     void Schedule(void (*function)(void*), void* arg) {
+      std::lock_guard<std::mutex> lock(mu_);
+
+      if (exit_all_threads_) {
+        return;
+      }
+
+      StartBGThreads();
+
+      // Add to priority queue
+      queue_.push_back(BGItem());
+      queue_.back().function = function;
+      queue_.back().arg = arg;
+      queue_len_.store(static_cast<unsigned int>(queue_.size()),
+        std::memory_order_relaxed);
+
+      if (!HasExcessiveThread()) {
+        // Wake up at least one waiting thread.
+        bgsignal_.notify_one();
+        // TODO(stash): Why not wake them up after releasing the lock ??
+      }
+      else {
+        // Need to wake up all threads to make sure the one woken
+        // up is not the one to terminate.
+        WakeUpAllThreads();
+      }
     }
 
     unsigned int GetQueueLen() const {
+      return queue_len_.load(std::memory_order_relaxed);
     }
 
    private:
     // Entry per Schedule() call
     struct BGItem { void* arg; void (*function)(void*); };
 
-    int total_threads_limit_;
+    std::mutex mu_;
+    std::condition_variable bgsignal_;
+    std::deque<BGItem> queue_;
+    std::vector<HANDLE> bgthreads_;
     std::atomic_uint queue_len_;  // Queue length. Used for stats reporting
+    int total_threads_limit_;
     bool exit_all_threads_;
+    bool low_io_priority_;
   };
+
+  std::vector<ThreadPool> thread_pools_;
+
+  std::mutex mu_;
+  std::vector<HANDLE> threads_to_join_;
 };
 
 WindowsEnv::WindowsEnv()
@@ -1019,8 +1200,8 @@ void WindowsEnv::Schedule(void(*function)(void*), void* arg, Priority pri) {
 }
 
 unsigned int WindowsEnv::GetThreadPoolQueueLen(Priority pri) const {
-  // Not implemented yet
-  return 0;
+  assert(pri >= Priority::LOW && pri <= Priority::HIGH);
+  return thread_pools_[pri].GetQueueLen();
 }
 
 namespace {
@@ -1029,17 +1210,28 @@ struct StartThreadState {
   void* arg;
 };
 }
-static void* StartThreadWrapper(void* arg) {
-  StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+static DWORD WINAPI StartThreadWrapper(void* arg) {
+  std::unique_ptr<StartThreadState> state(reinterpret_cast<StartThreadState*>(arg));
   state->user_function(state->arg);
-  delete state;
-  return nullptr;
+  return 0;
 }
 
 void WindowsEnv::StartThread(void(*function)(void* arg), void* arg) {
+  StartThreadState* state = new StartThreadState;
+  state->user_function = function;
+  state->arg = arg;
+  HANDLE t = CreateThread(NULL, 0, &StartThreadWrapper, state, 0, NULL);
+  std::lock_guard<std::mutex> lock(mu_);
+  threads_to_join_.push_back(t);
 }
 
 void WindowsEnv::WaitForJoin() {
+  DWORD waitStatus = WaitForMultipleObjects(threads_to_join_.size(), threads_to_join_.data(), true, INFINITE);
+  if (WAIT_FAILED == waitStatus)
+  {
+    // TODO(stash): log event
+  }
+  threads_to_join_.clear();
 }
 
 }  // namespace

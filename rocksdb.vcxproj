@@ -181,7 +181,6 @@
     <ClInclude Include="rocksdb\utilities\redis\redis_lists.h" />
     <ClInclude Include="rocksdb\utilities\redis\redis_list_exception.h" />
     <ClInclude Include="rocksdb\utilities\redis\redis_list_iterator.h" />
-    <ClCompile Include="main.cpp" />
     <ClCompile Include="rocksdb\utilities\ttl\db_ttl_impl.h" />
     <ClInclude Include="port\port_win.h" />
     <ClInclude Include="util\windows_logger.h" />
@@ -300,6 +299,7 @@
     <ClCompile Include="rocksdb\util\vectorrep.cc" />
     <ClCompile Include="rocksdb\util\xfunc.cc" />
     <ClCompile Include="rocksdb\util\xxhash.cc" />
+    <ClCompile Include="rocksdb\util\env_test.cc" />
     <ClCompile Include="rocksdb\utilities\backupable\backupable_db.cc" />
     <ClCompile Include="rocksdb\utilities\checkpoint\checkpoint.cc" />
     <ClCompile Include="rocksdb\utilities\compacted_db\compacted_db_impl.cc" />
