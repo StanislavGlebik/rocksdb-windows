@@ -58,10 +58,6 @@ private:
   HANDLE h_;
 };
 
-// list of pathnames that are locked
-static std::set<std::string> lockedFiles;
-static port::Mutex mutex_lockedFiles;
-
 static Status IOError(const std::string& context, int err_number) {
   return Status::IOError(context, strerror(err_number));
 }
@@ -676,6 +672,130 @@ class WindowsWritableFile : public WritableFile {
   }
 };
 
+class WindowsRandomRWFile : public RandomRWFile {
+private:
+  const std::string filename_;
+  HANDLE handle_;
+  bool pending_sync_;
+  bool pending_fsync_;
+#ifdef ROCKSDB_FALLOCATE_PRESENT
+  bool fallocate_with_keep_size_;
+#endif
+
+public:
+  WindowsRandomRWFile(const std::string& fname, HANDLE handle, const EnvOptions& options)
+    : filename_(fname),
+    handle_(handle),
+    pending_sync_(false),
+    pending_fsync_(false) {
+#ifdef ROCKSDB_FALLOCATE_PRESENT
+    fallocate_with_keep_size_ = options.fallocate_with_keep_size;
+#endif
+    assert(!options.use_mmap_writes && !options.use_mmap_reads);
+  }
+
+  ~WindowsRandomRWFile() {
+    if (handle_ != INVALID_HANDLE_VALUE) {
+      Close();
+    }
+  }
+
+  virtual Status Write(uint64_t offset, const Slice& data) override {
+    const char* src = data.data();
+    pending_sync_ = true;
+    pending_fsync_ = true;
+    Status s = SetWindowsFilePointer(offset);
+    if (!s.ok())
+    {
+      return s;
+    }
+    DWORD numberOfBytesWritten;
+    auto res = WriteFile(handle_, data.data(), data.size(), &numberOfBytesWritten, NULL);
+
+    if (res == FALSE || numberOfBytesWritten != data.size()) {
+      return IOError(filename_, GetLastError());
+    }
+    // TODO(stash): add stats
+    //  (bytes_written, done);
+
+    return Status::OK();
+  }
+
+  virtual Status Read(uint64_t offset, size_t n, Slice* result,
+    char* scratch) const override {
+    Status s = SetWindowsFilePointer(offset);
+    if (!s.ok())
+    {
+      return s;
+    }
+    DWORD numberOfBytesRead;
+    auto res = ReadFile(handle_, scratch, n, &numberOfBytesRead, NULL);
+    if (res == FALSE)
+    {
+      
+      return IOError(filename_, GetLastError());
+    }
+
+    *result = Slice(scratch, numberOfBytesRead);
+    // TODO(stash)
+    //IOSTATS_ADD_IF_POSITIVE(bytes_read, n - left);
+    return Status::OK();
+  }
+
+  virtual Status Close() override {
+    Status s = Status::OK();
+    if (handle_ != INVALID_HANDLE_VALUE && ::CloseHandle(handle_) == FALSE) {
+      s = IOError(filename_, errno);
+    }
+    handle_ = INVALID_HANDLE_VALUE;
+    return s;
+  }
+
+  virtual Status Sync() override {
+    // TODO(stash): check for fdatasync analog in Windows
+    if (pending_sync_ && FlushFileBuffers(handle_) == FALSE) {
+      return IOError(filename_, errno);
+    }
+    pending_sync_ = false;
+    return Status::OK();
+  }
+
+  virtual Status Fsync() override {
+    if (pending_fsync_ && FlushFileBuffers(handle_) == FALSE) {
+      return IOError(filename_, errno);
+    }
+    pending_fsync_ = false;
+    pending_sync_ = false;
+    return Status::OK();
+  }
+
+#ifdef ROCKSDB_FALLOCATE_PRESENT
+  virtual Status Allocate(off_t offset, off_t len) override {
+    TEST_KILL_RANDOM(rocksdb_kill_odds);
+    int alloc_status = fallocate(
+      fd_, fallocate_with_keep_size_ ? FALLOC_FL_KEEP_SIZE : 0, offset, len);
+    if (alloc_status == 0) {
+      return Status::OK();
+    }
+    else {
+      return IOError(filename_, errno);
+    }
+  }
+#endif
+  private:
+    Status SetWindowsFilePointer(uint64_t offset) const
+    {
+      LARGE_INTEGER windowsOffset;
+      windowsOffset.QuadPart = offset;
+      auto res = SetFilePointerEx(handle_, windowsOffset, NULL, FILE_BEGIN);
+      if (res != TRUE)
+      {
+        return IOError(filename_, GetLastError());
+      }
+      return Status::OK();
+    }
+};
+
 class WindowsDirectory : public Directory
 {
 public:
@@ -761,7 +881,41 @@ class WindowsEnv : public Env {
   virtual Status NewWritableFile(const std::string& fname,
                                  unique_ptr<WritableFile>* result,
                                  const EnvOptions& options) {
-    return Status::NotSupported("Not supported yet");
+    result->reset();
+    Status s;
+    // TODO(stash): check share mode
+    HANDLE h = ::CreateFile(TEXT(fname.c_str()), GENERIC_WRITE | GENERIC_READ,
+      FILE_SHARE_READ, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    if (INVALID_HANDLE_VALUE == h)
+    {
+      s = IOError(fname, GetLastError());
+    }
+    else {
+      if (options.use_mmap_writes) {
+        if (!checkedDiskForMmap_) {
+          // TODO(stash): 
+          forceMmapOff = false;
+          checkedDiskForMmap_ = true;
+        }
+      }
+      if (options.use_mmap_writes && !forceMmapOff) {
+        // TODO(stash)
+        s = Status::NotSupported("mmap writable file are not supported yet");
+        //result->reset(new PosixMmapFile(fname, fd, page_size_, options));
+      }
+      else {
+        // disable mmap writes
+        EnvOptions no_mmap_writes_options = options;
+        no_mmap_writes_options.use_mmap_writes = false;
+
+        result->reset(
+          new WindowsWritableFile(fname, h, 65536, no_mmap_writes_options)
+          );
+        s = Status::OK();
+      }
+    }
+    return s;
   }
 
   virtual Status NewRandomRWFile(const std::string& fname,
@@ -772,13 +926,20 @@ class WindowsEnv : public Env {
     if (options.use_mmap_writes || options.use_mmap_reads) {
       return Status::NotSupported("No support for mmap read/write yet");
     }
-    Status s;
-    return Status::NotSupported("Not supported yet");
+    HANDLE h = CreateFile(fname.c_str(), GENERIC_READ | GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+      return IOError(fname, GetLastError());
+    }
+    else {
+      result->reset(new WindowsRandomRWFile(fname, h, options));
+    }
+    return Status::OK();
   }
 
   virtual Status NewDirectory(const std::string& name,
                               unique_ptr<Directory>* result) {
-    result->reset();
+    result->reset(new WindowsDirectory());
     return Status::OK();
   }
 
@@ -892,12 +1053,56 @@ class WindowsEnv : public Env {
     *file_mtime = ans.QuadPart;
   }
 
+  class WindowsFileLock : public FileLock
+  {
+  public:
+    HANDLE h;
+    std::string filename;
+  };
+
   virtual Status LockFile(const std::string& fname, FileLock** lock) {
-    return Status::NotSupported("Not supported yet");
+    // TODO(stash): check params for CreateFile ShareMode
+    HANDLE h = ::CreateFile(TEXT(fname.c_str()), GENERIC_READ | GENERIC_WRITE, 0,
+      NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (INVALID_HANDLE_VALUE == h)
+    {
+      return IOError(fname, GetLastError());
+    }
+    OVERLAPPED overlapped;
+    overlapped.hEvent = 0;
+    overlapped.Offset = 0;
+    overlapped.OffsetHigh = 0;
+
+    BOOL res = ::LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0,
+      DWORD_MAX, DWORD_MAX, &overlapped);
+    if (!res)
+    {
+      return IOError(fname, GetLastError());
+    }
+    WindowsFileLock* windowsFileLock = new WindowsFileLock();
+    // TODO(stash): maybe delete filename?
+    windowsFileLock->filename = fname;
+    windowsFileLock->h = h;
+    (*lock) = windowsFileLock;
+
+    return Status::OK();
   }
 
   virtual Status UnlockFile(FileLock* lock) {
-    return Status::NotSupported("Not supported yet");
+    OVERLAPPED overlapped;
+    overlapped.hEvent = 0;
+    overlapped.Offset = 0;
+    overlapped.OffsetHigh = 0;
+
+    WindowsFileLock* windowsFileLock = reinterpret_cast<WindowsFileLock*>(lock);
+    BOOL res = ::UnlockFileEx(windowsFileLock->h, 0, DWORD_MAX, DWORD_MAX, &overlapped);
+    if (!res)
+    {
+      Status result = IOError(windowsFileLock->filename, GetLastError());
+      return result;
+    }   
+    delete lock;
+    return Status::OK();
   }
 
   virtual void Schedule(void (*function)(void*), void* arg, Priority pri = LOW);
@@ -909,7 +1114,32 @@ class WindowsEnv : public Env {
   virtual unsigned int GetThreadPoolQueueLen(Priority pri = LOW) const override;
 
   virtual Status GetTestDirectory(std::string* result) {
-    return Status::NotSupported("Not supported yet");
+    std::unique_ptr<char> env(new char[MAX_PATH]);
+    auto ret = ::GetEnvironmentVariableA("TEST_TMPDIR", env.get(), MAX_PATH);
+    if (0 == ret)
+    {
+      DWORD len = GetTempPathA(MAX_PATH, env.get());
+      if (0 == len)
+      {
+        return IOError("temp path", GetLastError());
+      }
+      else if (len > MAX_PATH)
+      {
+        env.reset(new char[len]);
+        len = GetTempPathA(len, env.get());
+        if (0 == len)
+        {
+          return IOError("temp path", GetLastError());
+        }
+      }
+      *result = env.get();
+      result->append("rocksdbtest");
+    }
+    else
+    {
+      *result = env.get();
+    }
+    return CreateDirIfMissing(*result);
   }
 
   virtual Status NewLogger(const std::string& fname,
@@ -926,7 +1156,7 @@ class WindowsEnv : public Env {
   }
 
   virtual void SleepForMicroseconds(int micros) {
-    // Not implemented yet
+    Sleep(micros / 1000);
   }
 
   virtual Status GetHostName(char* name, uint64_t len) {
@@ -944,6 +1174,7 @@ class WindowsEnv : public Env {
 
   // Allow increasing the number of worker threads.
   virtual void SetBackgroundThreads(int num, Priority pri) {
+    thread_pools_[pri].SetBackgroundThreads(num);
   }
 
   virtual std::string TimeToString(uint64_t secondsSince1970) {
@@ -963,7 +1194,7 @@ class WindowsEnv : public Env {
 
   virtual void IncBackgroundThreadsIfNeeded(int number, Priority pri)
   {
-    // Not implemented yet
+    thread_pools_[pri].IncBackgroundThreadsIfNeeded(number);
   }
 
  private:
@@ -972,11 +1203,18 @@ class WindowsEnv : public Env {
 
   // Returns true iff the named directory exists and is a directory.
   virtual bool DirExists(const std::string& dname) {
-    return false;
+    auto result = GetFileAttributes(TEXT(dname.c_str()));
+    if (result == INVALID_FILE_ATTRIBUTES)
+    {
+      return false;
+    }
+    else
+    {
+      return (result & FILE_ATTRIBUTE_DIRECTORY) > 0;
+    }
   }
 
   size_t page_size_;
-
 
   class ThreadPool {
    public:
@@ -994,6 +1232,17 @@ class WindowsEnv : public Env {
 
     ~ThreadPool() {
       assert(bgthreads_.size() == 0U);
+    }
+
+    // Return the thread priority.
+    // This would allow its member-thread to know its priority.
+    Env::Priority GetThreadPriority() {
+      return priority_;
+    }
+
+    // Set the thread priority.
+    void SetThreadPriority(Env::Priority priority) {
+      priority_ = priority;
     }
 
     void JoinAllThreads() {
@@ -1182,6 +1431,7 @@ class WindowsEnv : public Env {
     int total_threads_limit_;
     bool exit_all_threads_;
     bool low_io_priority_;
+    Priority priority_;
   };
 
   std::vector<ThreadPool> thread_pools_;
@@ -1192,11 +1442,18 @@ class WindowsEnv : public Env {
 
 WindowsEnv::WindowsEnv()
   : checkedDiskForMmap_(false),
-    forceMmapOff(false) {
+    forceMmapOff(false),
+    thread_pools_(Priority::TOTAL) {
+  for (int pool_id = 0; pool_id < Env::Priority::TOTAL; ++pool_id) {
+    thread_pools_[pool_id].SetThreadPriority(
+      static_cast<Env::Priority>(pool_id));
+  }
+  // TODO(stash): CreateThreadStatusUpdater
 }
 
 void WindowsEnv::Schedule(void(*function)(void*), void* arg, Priority pri) {
-  // Not implemented yet
+  assert(pri >= Priority::LOW && pri <= Priority::HIGH);
+  thread_pools_[pri].Schedule(function, arg);
 }
 
 unsigned int WindowsEnv::GetThreadPoolQueueLen(Priority pri) const {

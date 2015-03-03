@@ -21,7 +21,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
   </PropertyGroup>
   <PropertyGroup Label="Locals">
     <PlatformToolset>v120</PlatformToolset>
@@ -42,15 +42,17 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <AdditionalIncludeDirectories>.;rocksdb;rocksdb\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NOMINMAX;OS_WIN;ROCKSDB_ATOMIC_PRESENT;ROCKSDB_PLATFORM_WIN;_WIN32_WINNT=0x0601;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;_DEBUG;OS_WIN;ROCKSDB_ATOMIC_PRESENT;ROCKSDB_PLATFORM_WIN;_WIN32_WINNT=0x0601;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
       <WarningLevel>Level3</WarningLevel>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(ProjectName)$(TargetExt)</OutputFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>.;rocksdb;rocksdb\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -299,7 +301,6 @@
     <ClCompile Include="rocksdb\util\vectorrep.cc" />
     <ClCompile Include="rocksdb\util\xfunc.cc" />
     <ClCompile Include="rocksdb\util\xxhash.cc" />
-    <ClCompile Include="rocksdb\util\env_test.cc" />
     <ClCompile Include="rocksdb\utilities\backupable\backupable_db.cc" />
     <ClCompile Include="rocksdb\utilities\checkpoint\checkpoint.cc" />
     <ClCompile Include="rocksdb\utilities\compacted_db\compacted_db_impl.cc" />
