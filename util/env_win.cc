@@ -819,6 +819,16 @@ class WindowsEnv : public Env {
   WindowsEnv();
 
   virtual ~WindowsEnv() {
+    for (const auto tid : threads_to_join_) {
+      DWORD res = WaitForSingleObject(tid, INFINITE);
+      assert(WAIT_FAILED != res);
+    }
+    for (int pool_id = 0; pool_id < Env::Priority::TOTAL; ++pool_id) {
+      thread_pools_[pool_id].JoinAllThreads();
+    }
+    // All threads must be joined before the deletion of
+    // thread_status_updater_.
+    delete thread_status_updater_;
   }
 
   virtual Status NewSequentialFile(const std::string& fname,
