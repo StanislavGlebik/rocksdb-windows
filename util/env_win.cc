@@ -13,6 +13,7 @@
 #include "util/coding.h"
 #include "util/logging.h"
 #include "util/random.h"
+#include "util/posix_logger.h"
 #include <intsafe.h>
 #include <set>
 #include <signal.h>
@@ -25,8 +26,6 @@
 #include <condition_variable>
 #include <atomic>
 
-#define WORKING
-#ifdef WORKING
 
 // This is only set from db_stress.cc and for testing only.
 // If non-zero, kill at various points in source code with probability 1/this
@@ -192,12 +191,12 @@ class WindowsMmapReadableFile: public RandomAccessFile {
   HANDLE mapping_;
   std::string filename_;
   void* mmapped_region_;
-  size_t length_;
+  uint64_t length_;
 
  public:
   // base[0,length-1] contains the mmapped contents of the file.
    WindowsMmapReadableFile(HANDLE f, HANDLE m, const std::string& fname,
-                          void* base, size_t length,
+                          void* base, uint64_t length,
                           const EnvOptions& options)
       : file_(f), mapping_(m), filename_(fname), mmapped_region_(base), length_(length) {
     assert(options.use_mmap_reads);
@@ -544,7 +543,7 @@ class WindowsWritableFile : public WritableFile {
 
     TEST_KILL_RANDOM(rocksdb_kill_odds * REDUCE_ODDS2);
 
-    PrepareWrite(GetFileSize(), left);
+    PrepareWrite(static_cast<size_t>(GetFileSize()), left);
     // if there is no space in the cache, then flush
     if (cursize_ + left > capacity_) {
       s = Flush();
@@ -895,7 +894,7 @@ class WindowsEnv : public Env {
     Status s;
     // TODO(stash): check share mode
     HANDLE h = ::CreateFile(TEXT(fname.c_str()), GENERIC_WRITE | GENERIC_READ,
-      FILE_SHARE_READ, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+      FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
     if (INVALID_HANDLE_VALUE == h)
     {
@@ -954,12 +953,42 @@ class WindowsEnv : public Env {
   }
 
   virtual bool FileExists(const std::string& fname) {
-    return false;
+    auto fileAttrs = ::GetFileAttributesA(fname.c_str());
+    return fileAttrs != INVALID_FILE_ATTRIBUTES;
   }
 
   virtual Status GetChildren(const std::string& dir,
                              std::vector<std::string>* result) {
     result->clear();
+    DWORD dirAttrs = GetFileAttributesA(dir.c_str());
+    if (dirAttrs == INVALID_FILE_ATTRIBUTES) {
+      return IOError(dir, GetLastError());
+    }
+    if (!(dirAttrs & FILE_ATTRIBUTE_DIRECTORY)) {
+      return Status::InvalidArgument(dir + " not a directory!");
+    }
+    std::string path(dir);
+    if (path.back() != '/' && path.back() != '\\') {
+      path.append("\\");
+    }
+    path.append("*");
+    WIN32_FIND_DATAA data;
+    HANDLE file = ::FindFirstFileA(path.c_str(), &data);
+    if (file == INVALID_HANDLE_VALUE) {
+      DWORD errNumber = GetLastError();
+      if (errNumber == ERROR_FILE_NOT_FOUND) {
+        return Status::OK();
+      }
+      return IOError(dir, errNumber);
+    }
+
+    do {
+      if (strcmp(data.cFileName, ".") != 0 && strcmp(data.cFileName, "..") != 0) {
+        result->push_back(data.cFileName);
+      }
+    } while (FindNextFileA(file, &data) != 0);
+    FindClose(file);
+
     return Status::OK();
   }
 
@@ -993,7 +1022,7 @@ class WindowsEnv : public Env {
 
   virtual Status CreateDir(const std::string& name) {
     Status result;
-    auto res = ::CreateDirectory(TEXT(name.c_str()), NULL);
+    auto res = ::CreateDirectoryA(name.c_str(), NULL);
     if (0 == res)
     {
       auto error = GetLastError();
@@ -1004,7 +1033,7 @@ class WindowsEnv : public Env {
 
   virtual Status CreateDirIfMissing(const std::string& name) {
     Status result;
-    auto res = ::CreateDirectory(TEXT(name.c_str()), NULL);
+    auto res = ::CreateDirectoryA(name.c_str(), NULL);
     if (0 == res)
     {
       auto error = GetLastError();
@@ -1037,8 +1066,8 @@ class WindowsEnv : public Env {
       return Status::NotSupported(fname + " is a directory");
     }
 
-    *size = static_cast<uint64_t>(fad.nFileSizeHigh) <<
-      (sizeof(fad.nFileSizeLow) * 8) + fad.nFileSizeLow;
+    *size = (static_cast<uint64_t>(fad.nFileSizeHigh) <<
+      (sizeof(fad.nFileSizeLow) * 8)) + fad.nFileSizeLow;
     return Status::OK();
   }
 
@@ -1061,6 +1090,7 @@ class WindowsEnv : public Env {
     ans.HighPart = lwt.dwHighDateTime;
     ans.LowPart = lwt.dwLowDateTime;
     *file_mtime = ans.QuadPart;
+    return Status::OK();
   }
 
   class WindowsFileLock : public FileLock
@@ -1110,7 +1140,8 @@ class WindowsEnv : public Env {
     {
       Status result = IOError(windowsFileLock->filename, GetLastError());
       return result;
-    }   
+    }
+    CloseHandle(windowsFileLock->h);
     delete lock;
     return Status::OK();
   }
@@ -1152,9 +1183,23 @@ class WindowsEnv : public Env {
     return CreateDirIfMissing(*result);
   }
 
+  static uint64_t gettid() {
+    DWORD res = GetCurrentThreadId();
+    return res;
+  }
+
   virtual Status NewLogger(const std::string& fname,
                            shared_ptr<Logger>* result) {
-    return Status::NotSupported("Not supported yet");
+    FILE* f = fopen(fname.c_str(), "w");
+    if (f == nullptr) {
+      result->reset();
+      return IOError(fname, errno);
+    }
+    else {
+      int fd = _fileno(f);
+      result->reset(new PosixLogger(f, &WindowsEnv::gettid, this));
+      return Status::OK();
+    }
   }
 
   virtual uint64_t NowMicros() {
@@ -1210,19 +1255,6 @@ class WindowsEnv : public Env {
  private:
   bool checkedDiskForMmap_;
   bool forceMmapOff; // do we override Env options?
-
-  // Returns true iff the named directory exists and is a directory.
-  virtual bool DirExists(const std::string& dname) {
-    auto result = GetFileAttributes(TEXT(dname.c_str()));
-    if (result == INVALID_FILE_ATTRIBUTES)
-    {
-      return false;
-    }
-    else
-    {
-      return (result & FILE_ATTRIBUTE_DIRECTORY) > 0;
-    }
-  }
 
   size_t page_size_;
 
@@ -1513,5 +1545,3 @@ Env* Env::Default() {
 }
 
 }  // namespace rocksdb
-
-#endif

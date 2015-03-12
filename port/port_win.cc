@@ -18,6 +18,21 @@
 #include "util/logging.h"
 #include <Windows.h>
 
+int snprintf(char *str, size_t size, const char *format, ...)
+{
+  va_list ap;
+  va_start(ap, format);
+  int res = vsnprintf_s(str, size, _TRUNCATE, format, ap);
+  if (res == -1)
+  {
+    // Output was truncated
+    res = size - 1;
+    str[size - 1] = 0;
+  }
+  va_end(ap);
+  return res;
+}
+
 int gettimeofday(struct timeval *tv, struct timezone *tz) {
   if (tv != nullptr) {
     FILETIME ft;

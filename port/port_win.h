@@ -37,7 +37,6 @@
 
 #define __attribute__(x)
 #define __thread __declspec(thread)
-#define snprintf _snprintf
 
 struct timeval {
   long int tv_sec;
