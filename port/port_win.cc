@@ -64,7 +64,7 @@ void *pthread_getspecific(pthread_key_t key) {
 }
 
 int pthread_setspecific(pthread_key_t key, const void *value) {
-  return TlsSetValue(key, const_cast<void *>(value)) == FALSE ? 0 : GetLastError();
+  return !TlsSetValue(key, const_cast<void *>(value));
 }
 
 namespace rocksdb {

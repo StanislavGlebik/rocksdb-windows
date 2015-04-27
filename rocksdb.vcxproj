@@ -42,7 +42,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <AdditionalIncludeDirectories>.;rocksdb;rocksdb\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NOMINMAX;_DEBUG;OS_WIN;ROCKSDB_ATOMIC_PRESENT;ROCKSDB_PLATFORM_WIN;_WIN32_WINNT=0x0601;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;_DEBUG;OS_WIN;ROCKSDB_ATOMIC_PRESENT;ROCKSDB_PLATFORM_WIN;_WIN32_WINNT=0x0601;WIN32_LEAN_AND_MEAN;PRSIZE_TU="Iu";PRSIZE_TD="Id";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
       <WarningLevel>Level3</WarningLevel>
@@ -186,6 +186,7 @@
     <ClCompile Include="rocksdb\utilities\ttl\db_ttl_impl.h" />
     <ClInclude Include="port\port_win.h" />
     <ClInclude Include="util\windows_logger.h" />
+    <ClInclude Include="WindowsLoggerStub.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="util\env_win.cc" />

@@ -778,5 +778,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="util\windows_logger.h" />
+    <ClInclude Include="WindowsLoggerStub.h">
+      <Filter>rocksdb\util</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

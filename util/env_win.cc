@@ -14,6 +14,9 @@
 #include "util/logging.h"
 #include "util/random.h"
 #include "util/posix_logger.h"
+// TODO(stash): delete
+#include "WindowsLoggerStub.h"
+
 #include <intsafe.h>
 #include <set>
 #include <signal.h>
@@ -842,7 +845,7 @@ class WindowsEnv : public Env {
 	if (INVALID_HANDLE_VALUE == fileHandle)
 	{
 		*result = nullptr;
-		s = IOError(fname, errno);
+		s = IOError(fname, GetLastError());
 	} else {
 		result->reset(new WindowsSequentialFile(fname, fileHandle, options));
 		s = Status::OK();
@@ -1190,7 +1193,9 @@ class WindowsEnv : public Env {
 
   virtual Status NewLogger(const std::string& fname,
                            shared_ptr<Logger>* result) {
-    FILE* f = fopen(fname.c_str(), "w");
+    result->reset(new WindowsStubLogger());
+    return Status::OK();
+    /*FILE* f = fopen(fname.c_str(), "w");
     if (f == nullptr) {
       result->reset();
       return IOError(fname, errno);
@@ -1199,7 +1204,7 @@ class WindowsEnv : public Env {
       int fd = _fileno(f);
       result->reset(new PosixLogger(f, &WindowsEnv::gettid, this));
       return Status::OK();
-    }
+    }*/
   }
 
   virtual uint64_t NowMicros() {
