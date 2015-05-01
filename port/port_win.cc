@@ -18,6 +18,8 @@
 #include "util/logging.h"
 #include <Windows.h>
 
+#include <chrono>
+
 int snprintf(char *str, size_t size, const char *format, ...)
 {
   va_list ap;
@@ -72,25 +74,23 @@ namespace port {
 
 Mutex::Mutex(bool adaptive) {
   // ignore adaptive for non-linux platform
-  InitializeCriticalSection(&cs_);
 }
 
 Mutex::~Mutex() {
-  DeleteCriticalSection(&cs_);
 }
 
 void Mutex::Lock() {
-  EnterCriticalSection(&cs_);
+  m_.lock();
 #ifndef NDEBUG
   locked_ = true;
 #endif
 }
 
 void Mutex::Unlock() {
+  m_.unlock();
 #ifndef NDEBUG
   locked_ = false;
 #endif
-  LeaveCriticalSection(&cs_);
 }
 
 void Mutex::AssertHeld() {
@@ -101,7 +101,6 @@ void Mutex::AssertHeld() {
 
 CondVar::CondVar(Mutex* mu)
     : mu_(mu) {
-  InitializeConditionVariable(&cv_);
 }
 
 CondVar::~CondVar() {
@@ -111,7 +110,9 @@ void CondVar::Wait() {
 #ifndef NDEBUG
   mu_->locked_ = false;
 #endif
-  SleepConditionVariableCS(&cv_, &mu_->cs_, INFINITE);
+  std::unique_lock<std::mutex> lock(mu_->m_, std::adopt_lock);
+  cv_.wait(lock);
+  lock.release();
 #ifndef NDEBUG
   mu_->locked_ = true;
 #endif
@@ -121,42 +122,46 @@ bool CondVar::TimedWait(uint64_t abs_time_us) {
 #ifndef NDEBUG
   mu_->locked_ = false;
 #endif
-  BOOL success = SleepConditionVariableCS(&cv_, &mu_->cs_, static_cast<DWORD>(std::max(UINT32_MAX - 1ui64, abs_time_us / 1000)));
+  std::unique_lock<std::mutex> lock(mu_->m_);
+  std::chrono::steady_clock::duration duration = std::chrono::microseconds(abs_time_us);
+  std::chrono::steady_clock::time_point timePoint(duration);
+  std::cv_status result = cv_.wait_until(lock, timePoint);
+  lock.release();
 #ifndef NDEBUG
   mu_->locked_ = true;
 #endif
-  return success == FALSE && GetLastError() == ERROR_TIMEOUT;
+  return result == std::cv_status::no_timeout;
 }
 
 void CondVar::Signal() {
-  WakeConditionVariable(&cv_);
+  cv_.notify_one();
 }
 
 void CondVar::SignalAll() {
-  WakeAllConditionVariable(&cv_);
+  cv_.notify_all();
 }
 
 RWMutex::RWMutex() {
-  InitializeSRWLock(rw_);
+  InitializeSRWLock(&rw_);
 }
 
 RWMutex::~RWMutex() {
 }
 
 void RWMutex::ReadLock() {
-  AcquireSRWLockShared(rw_);
+  AcquireSRWLockShared(&rw_);
 }
 
 void RWMutex::WriteLock() {
-  AcquireSRWLockExclusive(rw_);
+  AcquireSRWLockExclusive(&rw_);
 }
 
 void RWMutex::ReadUnlock() { 
-  ReleaseSRWLockShared(rw_);
+  ReleaseSRWLockShared(&rw_);
 }
 
 void RWMutex::WriteUnlock() {
-  ReleaseSRWLockExclusive(rw_);
+  ReleaseSRWLockExclusive(&rw_);
 }
 
 BOOL CALLBACK RunInitializer(PINIT_ONCE InitOnce, PVOID Parameter, PVOID *lpContext) {

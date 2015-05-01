@@ -35,6 +35,8 @@
 
 #include "Windows.h"
 
+#include <condition_variable>
+#include <mutex>
 #define __attribute__(x)
 #define __thread __declspec(thread)
 
@@ -81,7 +83,7 @@ class Mutex {
 
  private:
   friend class CondVar;
-  CRITICAL_SECTION cs_; 
+  std::mutex m_;
 #ifndef NDEBUG
   bool locked_;
 #endif
@@ -103,7 +105,7 @@ class RWMutex {
   void AssertHeld() { }
 
  private:
-   PSRWLOCK rw_;
+   SRWLOCK rw_;
 
   // No copying allowed
   RWMutex(const RWMutex&);
@@ -120,7 +122,7 @@ class CondVar {
   void Signal();
   void SignalAll();
  private:
-  CONDITION_VARIABLE cv_;
+  std::condition_variable cv_;
   Mutex* mu_;
 };
 
