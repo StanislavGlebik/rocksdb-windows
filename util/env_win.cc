@@ -839,7 +839,7 @@ class WindowsEnv : public Env {
 	Status s;
     result->reset();
 	HANDLE fileHandle = CreateFile(fname.c_str(), GENERIC_READ,
-								   FILE_SHARE_READ, NULL, OPEN_EXISTING,
+								   FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
 								   FILE_ATTRIBUTE_NORMAL, NULL);
 	// TODO(stash): use mmap
 	if (INVALID_HANDLE_VALUE == fileHandle)
