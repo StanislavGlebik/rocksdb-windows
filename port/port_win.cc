@@ -87,10 +87,10 @@ void Mutex::Lock() {
 }
 
 void Mutex::Unlock() {
-  m_.unlock();
 #ifndef NDEBUG
   locked_ = false;
 #endif
+  m_.unlock();
 }
 
 void Mutex::AssertHeld() {
