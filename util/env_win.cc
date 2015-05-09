@@ -1206,17 +1206,21 @@ class WindowsEnv : public Env {
       return Status::OK();
     }*/
   }
-
+  // TODO(stash): replace time constants (1000000, 1000000000)
   virtual uint64_t NowMicros() {
-    return 0;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (now.QuadPart * 1000000) / queryPerfomanceFrequency_.QuadPart;
   }
 
   virtual uint64_t NowNanos() {
-    return 0;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (now.QuadPart * 1000000000) / queryPerfomanceFrequency_.QuadPart;
   }
 
   virtual void SleepForMicroseconds(int micros) {
-    Sleep(micros / 1000);
+    Sleep((micros + 1000) / 1000);
   }
 
   virtual Status GetHostName(char* name, uint64_t len) {
@@ -1258,6 +1262,7 @@ class WindowsEnv : public Env {
   }
 
  private:
+  LARGE_INTEGER queryPerfomanceFrequency_;
   bool checkedDiskForMmap_;
   bool forceMmapOff; // do we override Env options?
 
@@ -1491,6 +1496,8 @@ WindowsEnv::WindowsEnv()
   : checkedDiskForMmap_(false),
     forceMmapOff(false),
     thread_pools_(Priority::TOTAL) {
+  BOOL res = QueryPerformanceFrequency(&queryPerfomanceFrequency_);
+  // TODO(stash): check return value of QueryPerformanceFrequency
   for (int pool_id = 0; pool_id < Env::Priority::TOTAL; ++pool_id) {
     thread_pools_[pool_id].SetThreadPriority(
       static_cast<Env::Priority>(pool_id));
@@ -1541,7 +1548,17 @@ void WindowsEnv::WaitForJoin() {
 }  // namespace
 
 std::string Env::GenerateUniqueId() {
-  return "NOTSUPPORTEDYET";
+  Random64 r(time(nullptr));
+  uint64_t random_uuid_portion =
+    r.Uniform(std::numeric_limits<uint64_t>::max());
+  uint64_t nanos_uuid_portion = NowNanos();
+  char uuid2[200];
+  snprintf(uuid2,
+    200,
+    "%lx-%lx",
+    (unsigned long)nanos_uuid_portion,
+    (unsigned long)random_uuid_portion);
+  return uuid2;
 }
 
 Env* Env::Default() {

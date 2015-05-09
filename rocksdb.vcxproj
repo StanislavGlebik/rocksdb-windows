@@ -1,6 +1,10 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Default|Win32">
       <Configuration>Default</Configuration>
       <Platform>Win32</Platform>
@@ -9,9 +13,17 @@
       <Configuration>Debug</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="Default|x64">
+      <Configuration>Default</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Release|Win32">
       <Configuration>Release</Configuration>
       <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
@@ -58,6 +70,29 @@
       <AdditionalIncludeDirectories>.;rocksdb;rocksdb\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>NOMINMAX;OS_WIN;ROCKSDB_ATOMIC_PRESENT;ROCKSDB_PLATFORM_WIN;_WIN32_WINNT=0x0601;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>.;rocksdb;rocksdb\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NOMINMAX;_DEBUG;OS_WIN;ROCKSDB_ATOMIC_PRESENT;ROCKSDB_PLATFORM_WIN;_WIN32_WINNT=0x0601;WIN32_LEAN_AND_MEAN;PRSIZE_TU="Iu";PRSIZE_TD="Id";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>Disabled</Optimization>
+      <WarningLevel>Level3</WarningLevel>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)$(ProjectName)$(TargetExt)</OutputFile>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>.;rocksdb;rocksdb\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NOMINMAX;OS_WIN;ROCKSDB_ATOMIC_PRESENT;ROCKSDB_PLATFORM_WIN;_WIN32_WINNT=0x0601;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Lib>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="rocksdb.gyp" />
@@ -316,6 +351,7 @@
     <ClCompile Include="rocksdb\utilities\write_batch_with_index\write_batch_with_index.cc" />
     <ClCompile Include="rocksdb\db\db_impl.cc">
       <ShowIncludes Condition="'$(Configuration)|$(Platform)'=='Default|Win32'">false</ShowIncludes>
+      <ShowIncludes Condition="'$(Configuration)|$(Platform)'=='Default|x64'">false</ShowIncludes>
     </ClCompile>
     <ClCompile Include="port\port_win.cc" />
   </ItemGroup>
