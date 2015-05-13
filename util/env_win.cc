@@ -14,8 +14,8 @@
 #include "util/logging.h"
 #include "util/random.h"
 #include "util/posix_logger.h"
-// TODO(stash): delete
-#include "WindowsLoggerStub.h"
+
+#include "windows_logger.h"
 
 #include <intsafe.h>
 #include <set>
@@ -1191,19 +1191,19 @@ class WindowsEnv : public Env {
 
   virtual Status NewLogger(const std::string& fname,
                            shared_ptr<Logger>* result) {
-    result->reset(new WindowsStubLogger());
-    return Status::OK();
-    /*FILE* f = fopen(fname.c_str(), "w");
-    if (f == nullptr) {
+    HANDLE file = CreateFileA(fname.c_str(), GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (INVALID_HANDLE_VALUE == file)
+    {
       result->reset();
-      return IOError(fname, errno);
+      return IOError(fname, GetLastError());
     }
     else {
-      int fd = _fileno(f);
-      result->reset(new PosixLogger(f, &WindowsEnv::gettid, this));
+      result->reset(new WindowsLogger(file, this));
       return Status::OK();
-    }*/
+    }
   }
+
   // TODO(stash): replace time constants (1000000, 1000000000)
   virtual uint64_t NowMicros() {
     return std::chrono::duration_cast<std::chrono::microseconds>
