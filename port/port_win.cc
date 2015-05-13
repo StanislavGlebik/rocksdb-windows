@@ -122,15 +122,15 @@ bool CondVar::TimedWait(uint64_t abs_time_us) {
 #ifndef NDEBUG
   mu_->locked_ = false;
 #endif
-  std::unique_lock<std::mutex> lock(mu_->m_);
+  std::unique_lock<std::mutex> lock(mu_->m_, std::adopt_lock);
   std::chrono::steady_clock::duration duration = std::chrono::microseconds(abs_time_us);
-  std::chrono::steady_clock::time_point timePoint(duration);
-  std::cv_status result = cv_.wait_until(lock, timePoint);
+  std::chrono::steady_clock::time_point timepoint(duration);
+  std::cv_status result = cv_.wait_until(lock, timepoint);
   lock.release();
 #ifndef NDEBUG
   mu_->locked_ = true;
 #endif
-  return result == std::cv_status::no_timeout;
+  return result != std::cv_status::no_timeout;
 }
 
 void CondVar::Signal() {

@@ -897,7 +897,7 @@ class WindowsEnv : public Env {
     Status s;
     // TODO(stash): check share mode
     HANDLE h = ::CreateFile(TEXT(fname.c_str()), GENERIC_WRITE | GENERIC_READ,
-      FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+      FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
     if (INVALID_HANDLE_VALUE == h)
     {
@@ -1089,10 +1089,8 @@ class WindowsEnv : public Env {
     FILETIME lwt;
     ::GetFileTime(h, 0, 0, &lwt);
 
-    LARGE_INTEGER ans;
-    ans.HighPart = lwt.dwHighDateTime;
-    ans.LowPart = lwt.dwLowDateTime;
-    *file_mtime = ans.QuadPart;
+    __int64* val = (__int64*)&lwt;
+    *file_mtime = static_cast<uint64_t>(static_cast<double>(*val) / 10000000.0 - 11644473600.0);
     return Status::OK();
   }
 
@@ -1208,12 +1206,12 @@ class WindowsEnv : public Env {
   }
   // TODO(stash): replace time constants (1000000, 1000000000)
   virtual uint64_t NowMicros() {
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-    return (now.QuadPart * 1000000) / queryPerfomanceFrequency_.QuadPart;
+    return std::chrono::duration_cast<std::chrono::microseconds>
+      (std::chrono::steady_clock::now().time_since_epoch()).count();
   }
 
   virtual uint64_t NowNanos() {
+  	// TODO(stash): check clocks
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     return (now.QuadPart * 1000000000) / queryPerfomanceFrequency_.QuadPart;
@@ -1228,12 +1226,22 @@ class WindowsEnv : public Env {
   }
 
   virtual Status GetCurrentTime(int64_t* unix_time) {
-    return Status::NotSupported("Not supported yet");
+    time_t ret = time(nullptr);
+    if (ret == (time_t)-1) {
+      return IOError("GetCurrentTime", errno);
+    }
+    *unix_time = (int64_t)ret;
+    return Status::OK();
   }
 
   virtual Status GetAbsolutePath(const std::string& db_path,
       std::string* output_path) {
-    return Status::NotSupported("Not supported yet");
+    output_path->clear();
+    char temp[MAX_PATH + 1];
+    // TODO(stash): check it!!!
+    GetFullPathNameA(db_path.c_str(), MAX_PATH, temp, NULL);
+    *output_path = temp;
+    return Status::OK();
   }
 
   // Allow increasing the number of worker threads.
