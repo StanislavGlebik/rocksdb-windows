@@ -1218,7 +1218,17 @@ class WindowsEnv : public Env {
   }
 
   virtual void SleepForMicroseconds(int micros) {
-    Sleep((micros + 1000) / 1000);
+    if (micros != 0)
+    {
+      if ((micros / 1000) * 1000 < micros)
+      {
+        Sleep(micros / 1000 + 1);
+      }
+      else
+      {
+        Sleep(micros / 1000);
+      }
+    }
   }
 
   virtual Status GetHostName(char* name, uint64_t len) {
