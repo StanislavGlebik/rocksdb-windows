@@ -130,7 +130,7 @@ bool CondVar::TimedWait(uint64_t abs_time_us) {
 #ifndef NDEBUG
   mu_->locked_ = true;
 #endif
-  return result != std::cv_status::no_timeout;
+  return result == std::cv_status::timeout;
 }
 
 void CondVar::Signal() {
